@@ -180,6 +180,7 @@ def main():
     patch_strings = ["frida-agent-", "\"agent\" / \"frida-agent.", "\'frida-agent\'", "\"frida-agent\"", "get_frida_agent_"]
     for patch_string in patch_strings:
         replace_strings_in_files(custom_dir, patch_string, patch_string.replace("frida", f"{CUSTOM_NAME}"))
+    # Patch the original file back, which has incorrectly patched strings.
     wrong_patch_strings = [f'{CUSTOM_NAME}-agent-x86.symbols']
     for wrong_patch_string in wrong_patch_strings:
         replace_strings_in_files(custom_dir, wrong_patch_string, wrong_patch_string.replace(CUSTOM_NAME, 'frida'))
