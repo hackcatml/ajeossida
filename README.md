@@ -8,10 +8,17 @@ Since this is a manual patch that doesn't automatically follow the Frida upstrea
 I will occasionally build it, verify that the patch works properly, and then release it.
 
 # Patches
+- Android
 - [x] No `frida_agent_main` in memory<br>
 - [x] No `gum-js-loop, gmain, gdbus, frida-gadget` thread name in `/proc/<pid>/task/<thread_id>/status`<br>
 - [x] No `libfrida-agent-raw.so` in linker's so list
 - [x] No libc hooking<br>
+
+- iOS
+- [x] No `frida_agent_main` in memory<br>
+- [x] No `gum-js-loop, gmain, gdbus, pool-frida, pool-spawner` thread name<br>
+- [x] No `/usr/lib/frida/` 
+- [x] No `exit, abort, task_threads` hooking<br>
 
 # Contact
 - Channel: https://t.me/hackcatml1
