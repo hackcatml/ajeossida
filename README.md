@@ -20,6 +20,15 @@ I will occasionally build it, verify that the patch works properly, and then rel
 - [x] No `/usr/lib/frida/` 
 - [x] No `exit, abort, task_threads` hooking<br>
 
+# Run
+- MacOS<br>
+Output: server, gadget (Android, iOS)<br>
+`python3 main_macos.py`
+
+- Ubuntu 22.04<br>
+Output: server, gagdet (Android)<br>
+`python3 main_ubuntu.py`
+
 # Contact
 - Channel: https://t.me/hackcatml1
 - Chat: https://t.me/hackcatmlchat
