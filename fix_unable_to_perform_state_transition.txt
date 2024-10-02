@@ -1,0 +1,142 @@
+# fix_1
+  let copyingPhase = null;
+  if (apiLevel > 28) {
+    copyingPhase = Module.findExportByName('libart.so', '_ZN3art2gc9collector17ConcurrentCopying12CopyingPhaseEv');
+  } else if (apiLevel > 22) {
+    copyingPhase = Module.findExportByName('libart.so', '_ZN3art2gc9collector17ConcurrentCopying12MarkingPhaseEv');
+  }
+  if (Process.arch === 'arm64' && copyingPhase === null) {
+    let CopyingPhase_string_found_addr;
+    let CopyingPhase_string = '43 6f 70 79 69 6e 67 50 68 61 73 65';
+    const rodata_seciton = Module.enumerateSectionsSync('libart.so').filter(s => s.name == '.rodata')[0];
+    for (const match of Memory.scanSync(rodata_seciton.address, rodata_seciton.size, CopyingPhase_string)) {
+      if (match) {
+        CopyingPhase_string_found_addr = match.address.toString();
+        break;
+      }
+    }
+    let adrp, add;
+    let adrp_add_pattern = '?1 ?? FF ?0 21 ?? ?? 91';
+    let adrp_add_in_CopyingPhase_func;
+    const text_section = Module.enumerateSectionsSync('libart.so').filter(s => s.name == '.text')[0];
+    for (const match of Memory.scanSync(text_section.address, text_section.size, adrp_add_pattern)) {
+      let disasm = Instruction.parse(match.address);
+      if (disasm.mnemonic === "adrp") {
+        adrp = disasm.operands.find(op => op.type === 'imm')?.value;
+        disasm = Instruction.parse(disasm.next);
+        if (disasm.mnemonic !== "add") {
+          disasm = Instruction.parse(disasm.next);
+        }
+        add = disasm.operands.find(op => op.type === 'imm')?.value;
+        if (adrp !== undefined && add !== undefined && ptr(adrp).add(add).toString() === CopyingPhase_string_found_addr.toString()) {
+          if (adrp_add_in_CopyingPhase_func === undefined) {
+            adrp_add_in_CopyingPhase_func = match.address;
+            // console.log(`[*] Found adrp add address in art_gc_collector_ConcurrentCopying_CopyingPhase function: ${adrp_add_in_CopyingPhase_func}`);
+          }
+          for (let off = 0;; off += 4) {
+            disasm = Instruction.parse(adrp_add_in_CopyingPhase_func.sub(off));
+            if (disasm.mnemonic === "sub") {
+              disasm = Instruction.parse(disasm.next);
+              if (disasm.mnemonic === "stp") {
+                copyingPhase = disasm.address.sub(0x4);
+                // console.log(`[*] Found art_gc_collector_ConcurrentCopying_CopyingPhase function: ${copyingPhase}`);
+                break;
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+  }
+  if (copyingPhase !== null) {
+    Interceptor.attach(copyingPhase, artController.hooks.Gc.copyingPhase);
+  }
+
+  let runFlip = null;
+  runFlip = Module.findExportByName('libart.so', '_ZN3art6Thread15RunFlipFunctionEPS0_b');
+  if (runFlip === null) {
+    runFlip = Module.findExportByName('libart.so', '_ZN3art6Thread15RunFlipFunctionEPS0_'); // api 35
+  }
+  if (runFlip !== null) {
+    Interceptor.attach(runFlip, artController.hooks.Gc.runFlip);
+
+# fix_2
+function makeArtThreadStateTransitionImpl (vm, env, callback) {
+  const envVtable = env.handle.readPointer();
+  let exceptionClearImpl = envVtable.add(ENV_VTABLE_OFFSET_EXCEPTION_CLEAR).readPointer();
+  let nextFuncImpl = envVtable.add(ENV_VTABLE_OFFSET_FATAL_ERROR).readPointer();
+
+  if (Process.arch === 'arm64') {
+    let JNI_FatalError_Called_string_found_addr;
+    let JNI_FatalError_Called_string = '4A 4E 49 20 46 61 74 61 6C 45 72 72 6F 72 20 63 61 6C';
+    const rodata_seciton = Module.enumerateSectionsSync('libart.so').filter(s => s.name == '.rodata')[0];
+    for (const match of Memory.scanSync(rodata_seciton.address, rodata_seciton.size, JNI_FatalError_Called_string)) {
+      if (match) {
+        JNI_FatalError_Called_string_found_addr = match.address.toString();
+        break;
+      }
+    }
+
+    let adrp, add;
+    let adrp_add_pattern = '?1 ?? FF ?0 21 ?? ?? 91';
+    let adrp_add_in_JNI_false_FatalError_func;
+    let adrp_add_in_JNI_true_FatalError_func;
+    let JNI_true_FatalError_func;
+    let JNI_ExceptionClear_func;
+    const text_section = Module.enumerateSectionsSync('libart.so').filter(s => s.name == '.text')[0];
+    for (const match of Memory.scanSync(text_section.address, text_section.size, adrp_add_pattern)) {
+      let disasm = Instruction.parse(match.address);
+      if (disasm.mnemonic === "adrp") {
+        adrp = disasm.operands.find(op => op.type === 'imm')?.value;
+        disasm = Instruction.parse(disasm.next);
+        if (disasm.mnemonic !== "add") {
+          disasm = Instruction.parse(disasm.next);
+        }
+        add = disasm.operands.find(op => op.type === 'imm')?.value;
+        if (adrp !== undefined && add !== undefined && ptr(adrp).add(add).toString() === JNI_FatalError_Called_string_found_addr.toString()) {
+          if (adrp_add_in_JNI_false_FatalError_func === undefined) {
+            adrp_add_in_JNI_false_FatalError_func = match.address;
+            continue;
+          }
+          if (adrp_add_in_JNI_true_FatalError_func === undefined) {
+            adrp_add_in_JNI_true_FatalError_func = match.address;
+            // console.log(`[*] Found adrp add address in art_JNI_true_FatalError function: ${adrp_add_in_JNI_true_FatalError_func}`);
+          }
+          for (let off = 0;; off += 4) {
+            disasm = Instruction.parse(adrp_add_in_JNI_true_FatalError_func.sub(off));
+            if (disasm.mnemonic === "sub") {
+              disasm = Instruction.parse(disasm.next);
+              if (disasm.mnemonic === "stp") {
+                JNI_true_FatalError_func = disasm.address.sub(0x4);
+                // console.log(`[*] Found art_JNI_true_FatalError function: ${JNI_true_FatalError_func}`);
+                break;
+              }
+            }
+          }
+          if (JNI_true_FatalError_func !== undefined) {
+            for (let off = 0;; off += 4) {
+              disasm = Instruction.parse(JNI_true_FatalError_func.sub(0x4).sub(off));
+              if (disasm.mnemonic === "sub") {
+                disasm = Instruction.parse(disasm.next);
+                if (disasm.mnemonic === "stp") {
+                  JNI_ExceptionClear_func = disasm.address.sub(0x4);
+                  // console.log(`[*] Found art_JNI_true_ExceptionClear function: ${JNI_ExceptionClear_func}`);
+                  break;
+                }
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+    if (JNI_true_FatalError_func !== undefined && JNI_ExceptionClear_func !== undefined) {
+      exceptionClearImpl = JNI_ExceptionClear_func;
+      nextFuncImpl = JNI_true_FatalError_func;
+    }
+  }
+
+# fix_end
+
+
