@@ -2,7 +2,7 @@
 Frida with patches that definitively fix basic detection points on Android and iOS.<br> 
 Unfortunately, I discovered that the patches in several custom Frida builds for bypassing detections are incomplete and still detectable.<br>
 For example, `frida_agent_main` in memory and the `gum-js-loop` thread name.<br> 
-Therefore, I created a Python build script to address these issues (this script is only tested on macOS).
+Therefore, I created a Python build script to address these issues.
 
 Since this is a manual patch that doesn't automatically follow the Frida upstream,<br> 
 I will occasionally build it, verify that the patch works properly, and then release it.
