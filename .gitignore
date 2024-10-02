@@ -4,5 +4,4 @@ ajeossida
 venv
 .DS_Store
 ios-assets
-frida-java-bridge
-frida-orig
+

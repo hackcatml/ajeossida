@@ -5,10 +5,6 @@ import subprocess
 import sys
 
 CUSTOM_NAME = "ajeossida"
-BUILD_IOS = False
-
-# Temporarily fixing the issue 'Unable to perform state transition.', 'Failed to reach single-threaded state'
-TEMP = 1
 
 
 def run_command(command, cwd=None):
@@ -22,14 +18,12 @@ def run_command(command, cwd=None):
             print(f"\n[*] Patch 'get_frida_helper_' with 'get_{CUSTOM_NAME}_helper_' recursively...")
             patch_strings = ["get_frida_helper_"]
             for patch_string in patch_strings:
-                replace_strings_in_files(os.path.join(os.getcwd(), CUSTOM_NAME), patch_string,
-                                         patch_string.replace("frida", f"{CUSTOM_NAME}"))
+                replace_strings_in_files(os.path.join(os.getcwd(), CUSTOM_NAME), patch_string, patch_string.replace("frida", f"{CUSTOM_NAME}"))
             # frida-agent patch
             print(f"\n[*] Patch 'get_frida_agent_' with 'get_{CUSTOM_NAME}_agent_' recursively...")
             patch_strings = ["get_frida_agent_"]
             for patch_string in patch_strings:
-                replace_strings_in_files(os.path.join(os.getcwd(), CUSTOM_NAME), patch_string,
-                                         patch_string.replace("frida", f"{CUSTOM_NAME}"))
+                replace_strings_in_files(os.path.join(os.getcwd(), CUSTOM_NAME), patch_string, patch_string.replace("frida", f"{CUSTOM_NAME}"))
             # build again
             build(cwd)
         else:
@@ -85,9 +79,7 @@ def configure_build(ndk_path, arch):
 
     print(f"\n[*] Configuring the build for {arch}...")
     if 'ios-' in arch:
-        result = run_command(
-            f"{os.path.join('..', 'configure')} --prefix=/usr --host={arch} --enable-portal -- -Dfrida-gum:devkits=gum,gumjs -Dfrida-core:assets=installed -Dfrida-core:devkits=core",
-            cwd=build_dir)
+        result = run_command(f"{os.path.join('..', 'configure')} --prefix=/usr --host={arch} --enable-portal -- -Dfrida-gum:devkits=gum,gumjs -Dfrida-core:assets=installed -Dfrida-core:devkits=core", cwd=build_dir)
     else:
         result = run_command(f"{os.path.join('..', 'configure')} --host={arch}", cwd=build_dir)
 
@@ -149,84 +141,6 @@ def capitalize_first_lower_char(word):
     return word
 
 
-# Helper function to extract lines between fix markers
-def extract_between_fixes(filename, start_marker, end_marker):
-    with open(filename, 'r', encoding='utf-8') as file:
-        lines = []
-        start_reading = False
-        for line in file:
-            if start_marker in line:
-                start_reading = True
-                continue
-            if end_marker in line:
-                break
-            if start_reading:
-                lines.append(line)
-        lines.pop()
-        return ''.join(lines)
-
-
-def fix_unable_to_perform_state_transition(custom_dir):
-    repo_url = "https://github.com/frida/frida-java-bridge.git"
-    run_command(f"git clone {repo_url}")
-    frida_java_bridge_path = os.path.join(os.getcwd(), "frida-java-bridge")
-    run_command(f"sudo npm remove -g frida-java-bridge", cwd=frida_java_bridge_path)
-    run_command(f"npm install", cwd=frida_java_bridge_path)
-    run_command(f"sudo npm link", cwd=frida_java_bridge_path)
-
-    generate_runtime_path = os.path.join(custom_dir, "subprojects/frida-gum/bindings/gumjs/generate-runtime.py")
-    replace_strings_in_files(generate_runtime_path,
-                             'frida_compile = priv_dir / "node_modules" / ".bin" / make_script_filename("frida-compile")',
-                             'frida_compile = priv_dir / "node_modules" / ".bin" / make_script_filename("frida-compile")\n'
-                             '    subprocess.run([npm, "link", "frida-java-bridge"],\n'
-                             '                    capture_output=True,\n'
-                             '                    cwd=priv_dir,\n'
-                             '                    check=True)')
-
-    frida_java_bridge_android_js_path = os.path.join(frida_java_bridge_path, "lib/android.js")
-    content = extract_between_fixes("fix_unable_to_perform_state_transition.txt", "# fix_1", "# fix_2")
-    replace_strings_in_files(frida_java_bridge_android_js_path,
-                             '  const mayUseCollector = (apiLevel > 28)\n'
-                             '    ? (type) => {\n'
-                             '        const impl = Module.findExportByName(\'libart.so\', \'_ZNK3art2gc4Heap15MayUseCollectorENS0_13CollectorTypeE\');\n'
-                             '        if (impl === null) {\n'
-                             '          return false;\n'
-                             '        }\n'
-                             '        return new NativeFunction(impl, \'bool\', [\'pointer\', \'int\'])(getApi().artHeap, type);\n'
-                             '      }\n'
-                             '    : () => false;\n'
-                             '  const kCollectorTypeCMC = 3;\n'
-                             '\n'
-                             '  if (mayUseCollector(kCollectorTypeCMC)) {\n'
-                             '    Interceptor.attach(Module.getExportByName(\'libart.so\', \'_ZN3art6Thread15RunFlipFunctionEPS0_b\'), artController.hooks.Gc.runFlip);\n'
-                             '  } else {\n'
-                             '    let copyingPhase = null;\n'
-                             '    if (apiLevel > 28) {\n'
-                             '      copyingPhase = Module.findExportByName(\'libart.so\', \'_ZN3art2gc9collector17ConcurrentCopying12CopyingPhaseEv\');\n'
-                             '    } else if (apiLevel > 22) {\n'
-                             '      copyingPhase = Module.findExportByName(\'libart.so\', \'_ZN3art2gc9collector17ConcurrentCopying12MarkingPhaseEv\');\n'
-                             '    }\n'
-                             '    if (copyingPhase !== null) {\n'
-                             '      Interceptor.attach(copyingPhase, artController.hooks.Gc.copyingPhase);\n'
-                             '    }',
-                             content)
-
-    content = extract_between_fixes("fix_unable_to_perform_state_transition.txt", "# fix_2", "# fix_end")
-    replace_strings_in_files(frida_java_bridge_android_js_path,
-                             'function makeArtThreadStateTransitionImpl (vm, env, callback) {\n'
-                             '  const envVtable = env.handle.readPointer();\n'
-                             '  const exceptionClearImpl = envVtable.add(ENV_VTABLE_OFFSET_EXCEPTION_CLEAR).readPointer();\n'
-                             '  const nextFuncImpl = envVtable.add(ENV_VTABLE_OFFSET_FATAL_ERROR).readPointer();',
-                             content)
-
-
-def fix_failed_to_reach_single_threaded_state(custom_dir):
-    old_cloak_vala_path = os.path.join(custom_dir, "subprojects/frida-core/lib/payload/cloak.vala")
-    new_cloak_vala_path = os.path.join(os.getcwd(), "fix_failed_to_reach_single_threaded_state.txt")
-    os.remove(old_cloak_vala_path)
-    shutil.copy(new_cloak_vala_path, old_cloak_vala_path)
-
-
 def main():
     custom_dir = os.path.join(os.getcwd(), CUSTOM_NAME)
     if os.path.exists(custom_dir):
@@ -247,18 +161,12 @@ def main():
     ios_assets_frida_agent_dir = os.path.join(ios_assets_dir, f'usr/lib/{CUSTOM_NAME}')
     os.makedirs(ios_assets_frida_server_dir, exist_ok=True)
     os.makedirs(ios_assets_frida_agent_dir, exist_ok=True)
-    if not BUILD_IOS:
-        shutil.rmtree(ios_assets_dir)
 
     git_clone_repo()
 
     ndk_version_path = check_ndk_version()
 
-    architectures = ["android-arm64", "android-arm", "android-x86_64", "android-x86"]
-    if BUILD_IOS:
-        architectures = ["android-arm64", "android-arm", "android-x86_64", "android-x86", "ios-arm64e"]
-    if TEMP == 1:
-        architectures = ["android-arm64"]
+    architectures = ["android-arm64", "android-arm", "android-x86_64", "android-x86", "ios-arm64e"]
     build_dirs = [configure_build(ndk_version_path, arch) for arch in architectures]
 
     # libfrida-agent-raw.so patch
@@ -285,13 +193,11 @@ def main():
 
     # frida-agent patch
     print(f"\n[*] Patch 'frida-agent' with '{CUSTOM_NAME}-agent' recursively...")
-    patch_strings = ["frida-agent-", "\"agent\" / \"frida-agent.", "\'frida-agent\'", "\"frida-agent\"",
-                     "get_frida_agent_", "\'FridaAgent\'"]
+    patch_strings = ["frida-agent-", "\"agent\" / \"frida-agent.", "\'frida-agent\'", "\"frida-agent\"", "get_frida_agent_", "\'FridaAgent\'"]
     for patch_string in patch_strings:
         replace_strings_in_files(custom_dir,
                                  patch_string,
-                                 patch_string.replace("Frida", capitalize_first_lower_char(
-                                     CUSTOM_NAME)) if "Frida" in patch_string else
+                                 patch_string.replace("Frida", capitalize_first_lower_char(CUSTOM_NAME)) if "Frida" in patch_string else
                                  patch_string.replace("frida", CUSTOM_NAME))
 
     # Patch the original file back, which has incorrectly patched strings.
@@ -337,13 +243,11 @@ def main():
                              patch_string.replace("frida", CUSTOM_NAME))
 
     frida_gadget_meson_path = os.path.join(custom_dir, "subprojects/frida-core/lib/gadget/meson.build")
-    patch_strings = ["frida-gadget-modulated", "libfrida-gadget-modulated", "frida-gadget-raw", "\'frida-gadget\'",
-                     "frida-gadget-universal", "FridaGadget.dylib"]
+    patch_strings = ["frida-gadget-modulated", "libfrida-gadget-modulated", "frida-gadget-raw", "\'frida-gadget\'", "frida-gadget-universal", "FridaGadget.dylib"]
     for patch_string in patch_strings:
         replace_strings_in_files(frida_gadget_meson_path,
                                  patch_string,
-                                 patch_string.replace("Frida", capitalize_first_lower_char(
-                                     CUSTOM_NAME)) if "Frida" in patch_string else
+                                 patch_string.replace("Frida", capitalize_first_lower_char(CUSTOM_NAME)) if "Frida" in patch_string else
                                  patch_string.replace("frida", CUSTOM_NAME))
 
     # gum-js-loop patch
@@ -371,24 +275,21 @@ def main():
 
     # frida/subprojects/frida-gum/gum/backend-posix/gumexceptor-posix.c
     gumexceptor_posix_path = os.path.join(custom_dir, "subprojects/frida-gum/gum/backend-posix/gumexceptor-posix.c")
-    gumexceptor_posix_patch_strings = ["gum_interceptor_replace",
-                                       "gum_exceptor_backend_replacement_signal, self, NULL);",
-                                       "gum_exceptor_backend_replacement_sigaction, self, NULL);"]
+    gumexceptor_posix_patch_strings = ["gum_interceptor_replace", "gum_exceptor_backend_replacement_signal, self, NULL);",
+                     "gum_exceptor_backend_replacement_sigaction, self, NULL);"]
     for patch_string in gumexceptor_posix_patch_strings:
         replace_strings_in_files(gumexceptor_posix_path,
                                  patch_string,
                                  "// " + patch_string)
 
     # No removing cloaked threads
-    if BUILD_IOS:
-        print(f"\n[*] Patch thread-suspend-monitor for iOS")
-        # frida/subprojects/frida-core/lib/payload/thread-suspend-monitor.vala
-        thread_suspend_monitor_path = os.path.join(custom_dir,
-                                                   "subprojects/frida-core/lib/payload/thread-suspend-monitor.vala")
-        patch_string = "interceptor.replace ((void *) task_threads"
-        replace_strings_in_files(thread_suspend_monitor_path,
-                                 patch_string,
-                                 "// " + patch_string)
+    print(f"\n[*] Patch thread-suspend-monitor for iOS")
+    # frida/subprojects/frida-core/lib/payload/thread-suspend-monitor.vala
+    thread_suspend_monitor_path = os.path.join(custom_dir, "subprojects/frida-core/lib/payload/thread-suspend-monitor.vala")
+    patch_string = "interceptor.replace ((void *) task_threads"
+    replace_strings_in_files(thread_suspend_monitor_path,
+                             patch_string,
+                             "// " + patch_string)
 
     # # Need to patch?? frida/subprojects/frida-core/lib/payload/unwind-sitter.vala
     # print(f"\n[*] Patch unwind-sitter.vala for iOS")
@@ -410,15 +311,11 @@ def main():
                              patch_string,
                              patch_string.replace("frida", CUSTOM_NAME))
 
-    if TEMP == 1:
-        fix_unable_to_perform_state_transition(custom_dir)
-        fix_failed_to_reach_single_threaded_state(custom_dir)
-
     # Second build after patching
     for build_dir in build_dirs:
         print(f"\n[*] Second build for {build_dir.rsplit('/')[-1]}")
         build(build_dir)
-        if BUILD_IOS and 'ios-' in build_dir:
+        if 'ios-' in build_dir:
             # No patch gumexceptor-posix.c to prevent the crash issue when scanning the memory
             for patch_string in gumexceptor_posix_patch_strings:
                 replace_strings_in_files(gumexceptor_posix_path,
@@ -446,16 +343,11 @@ def main():
     pool_spawner = bytes.fromhex('70 6f 6f 6c 2d 73 70 61 77 6e 65 72 00')
     pool_spoiler = bytes.fromhex('70 6f 6f 6c 2d 73 70 6f 69 6c 65 72 00')
 
-    patch_list = [os.path.join(build_dir, f"subprojects/frida-core/server/{CUSTOM_NAME}-server") for build_dir in
-                  build_dirs] + \
-                 [os.path.join(build_dir,
-                               f"subprojects/frida-core/lib/agent/{CUSTOM_NAME}-agent.dylib") if "ios" in build_dir else
-                  os.path.join(build_dir, f"subprojects/frida-core/lib/agent/{CUSTOM_NAME}-agent.so") for build_dir in
-                  build_dirs] + \
-                 [os.path.join(build_dir,
-                               f"subprojects/frida-core/lib/gadget/{CUSTOM_NAME}-gadget.dylib") if "ios" in build_dir else
-                  os.path.join(build_dir, f"subprojects/frida-core/lib/gadget/{CUSTOM_NAME}-gadget.so") for build_dir in
-                  build_dirs]
+    patch_list = [os.path.join(build_dir, f"subprojects/frida-core/server/{CUSTOM_NAME}-server") for build_dir in build_dirs] + \
+                 [os.path.join(build_dir, f"subprojects/frida-core/lib/agent/{CUSTOM_NAME}-agent.dylib") if "ios" in build_dir else
+                  os.path.join(build_dir, f"subprojects/frida-core/lib/agent/{CUSTOM_NAME}-agent.so") for build_dir in build_dirs] + \
+                 [os.path.join(build_dir, f"subprojects/frida-core/lib/gadget/{CUSTOM_NAME}-gadget.dylib") if "ios" in build_dir else
+                  os.path.join(build_dir, f"subprojects/frida-core/lib/gadget/{CUSTOM_NAME}-gadget.so") for build_dir in build_dirs]
 
     for file_path in patch_list:
         # Open the binary file for reading and writing
@@ -471,16 +363,15 @@ def main():
             f.write(patched_content)
             f.truncate()
 
-    if BUILD_IOS:
-        # Patch packcage-server-fruity.sh for iOS
-        print(f"\n[*] Patch package-server-fruity.sh")
-        # frida/subprojects/frida-core/tools/package-server-fruity.sh
-        package_server_fruity_path = os.path.join(custom_dir, "subprojects/frida-core/tools/package-server-fruity.sh")
-        patch_strings = ["frida-server", "frida-agent.dylib"]
-        for patch_string in patch_strings:
-            replace_strings_in_files(package_server_fruity_path,
-                                     patch_string,
-                                     patch_string.replace("frida", f"{CUSTOM_NAME}"))
+    # Patch packcage-server-fruity.sh for iOS
+    print(f"\n[*] Patch package-server-fruity.sh")
+    # frida/subprojects/frida-core/tools/package-server-fruity.sh
+    package_server_fruity_path = os.path.join(custom_dir, "subprojects/frida-core/tools/package-server-fruity.sh")
+    patch_strings = ["frida-server", "frida-agent.dylib"]
+    for patch_string in patch_strings:
+        replace_strings_in_files(package_server_fruity_path,
+                                 patch_string,
+                                 patch_string.replace("frida", f"{CUSTOM_NAME}"))
 
     # Get frida version
     frida_version_py = os.path.join(custom_dir, "releng/frida_version.py")
@@ -489,7 +380,7 @@ def main():
 
     # Rename
     for file_path in patch_list:
-        if BUILD_IOS and 'ios-' in file_path:
+        if 'ios-' in file_path:
             try:
                 if '-server' in file_path:
                     shutil.move(file_path, ios_assets_frida_server_dir)
@@ -508,12 +399,8 @@ def main():
 
             if file_path.endswith('.so'):
                 new_file_path = f"{file_path.rsplit('.so', 1)[0]}-{frida_version}-{arch}.so"
-                if TEMP == 1:
-                    new_file_path = f"{file_path.rsplit('.so', 1)[0]}-{frida_version}-{arch}-temp.so"
             else:
                 new_file_path = f"{file_path}-{frida_version}-{arch}"
-                if TEMP == 1:
-                    new_file_path = f"{file_path}-{frida_version}-{arch}-temp"
 
             try:
                 os.rename(file_path, new_file_path)
@@ -524,38 +411,31 @@ def main():
             except Exception as e:
                 print(f"[!] Error renaming {file_path}: {e}")
 
-    if BUILD_IOS:
-        # Create universal frida-server for iOS
-        # lipo, codesign frida-server, codesign frida-agent.dylib
+    # Create universal frida-server for iOS
+    # lipo, codesign frida-server, codesign frida-agent.dylib
+    for arch in ["arm64", "arm64e"]:
+        run_command(f"lipo {CUSTOM_NAME}-server -thin {arch} -output {CUSTOM_NAME}-server-{arch}", cwd=f"{ios_assets_dir}/usr/bin")
+        run_command(f"codesign -f -s \"-\" --preserve-metadata=entitlements {CUSTOM_NAME}-server-{arch}", cwd=f"{ios_assets_dir}/usr/bin")
+    run_command(f"codesign -f -s \"-\" {CUSTOM_NAME}-agent.dylib", cwd=f"{ios_assets_dir}/usr/lib/{CUSTOM_NAME}")
+    # Codesign frida-gadget.dylib
+    run_command(f"codesign -f -s \"-\" {CUSTOM_NAME}-gadget.dylib", cwd=f"{ios_assets_dir}")
+
+    # Make fat macho
+    print("\n[*] Making fat macho...")
+    mkfatmacho_py = os.path.join(custom_dir, "releng/mkfatmacho.py")
+    result = subprocess.run(["python3", mkfatmacho_py, f"{CUSTOM_NAME}-server", f"{CUSTOM_NAME}-server-arm64", f"{CUSTOM_NAME}-server-arm64e"], capture_output=True, text=True, cwd=f"{ios_assets_dir}/usr/bin")
+    if result.returncode == 0:
         for arch in ["arm64", "arm64e"]:
-            run_command(f"lipo {CUSTOM_NAME}-server -thin {arch} -output {CUSTOM_NAME}-server-{arch}",
-                        cwd=f"{ios_assets_dir}/usr/bin")
-            run_command(f"codesign -f -s \"-\" --preserve-metadata=entitlements {CUSTOM_NAME}-server-{arch}",
-                        cwd=f"{ios_assets_dir}/usr/bin")
-        run_command(f"codesign -f -s \"-\" {CUSTOM_NAME}-agent.dylib", cwd=f"{ios_assets_dir}/usr/lib/{CUSTOM_NAME}")
-        # Codesign frida-gadget.dylib
-        run_command(f"codesign -f -s \"-\" {CUSTOM_NAME}-gadget.dylib", cwd=f"{ios_assets_dir}")
+            os.remove(f"{ios_assets_dir}/usr/bin/{CUSTOM_NAME}-server-{arch}")
+    else:
+        print("Error while making fat macho")
+        sys.exit(1)
 
-        # Make fat macho
-        print("\n[*] Making fat macho...")
-        mkfatmacho_py = os.path.join(custom_dir, "releng/mkfatmacho.py")
-        result = subprocess.run(["python3", mkfatmacho_py, f"{CUSTOM_NAME}-server", f"{CUSTOM_NAME}-server-arm64",
-                                 f"{CUSTOM_NAME}-server-arm64e"], capture_output=True, text=True,
-                                cwd=f"{ios_assets_dir}/usr/bin")
-        if result.returncode == 0:
-            for arch in ["arm64", "arm64e"]:
-                os.remove(f"{ios_assets_dir}/usr/bin/{CUSTOM_NAME}-server-{arch}")
-        else:
-            print("Error while making fat macho")
-            sys.exit(1)
-
-        # deb packaging
-        print("\n[*] Packaging deb...")
-        os.environ['FRIDA_VERSION'] = frida_version
-        deb_packaging_arch = "iphoneos-arm64"
-        run_command(
-            f"{custom_dir}/subprojects/frida-core/tools/package-server-fruity.sh {deb_packaging_arch} {ios_assets_dir} {CUSTOM_NAME}_{os.environ['FRIDA_VERSION']}_{deb_packaging_arch}.deb",
-            cwd=assets_dir)
+    # deb packaging
+    print("\n[*] Packaging deb...")
+    os.environ['FRIDA_VERSION'] = frida_version
+    deb_packaging_arch = "iphoneos-arm64"
+    run_command(f"{custom_dir}/subprojects/frida-core/tools/package-server-fruity.sh {deb_packaging_arch} {ios_assets_dir} {CUSTOM_NAME}_{os.environ['FRIDA_VERSION']}_{deb_packaging_arch}.deb", cwd=assets_dir)
 
     print(f"\n[*] Building of {CUSTOM_NAME} completed. The output is in the assets directory")
 
