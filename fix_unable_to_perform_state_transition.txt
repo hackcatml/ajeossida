@@ -66,8 +66,12 @@ function makeArtThreadStateTransitionImpl (vm, env, callback) {
   const envVtable = env.handle.readPointer();
   let exceptionClearImpl = envVtable.add(ENV_VTABLE_OFFSET_EXCEPTION_CLEAR).readPointer();
   let nextFuncImpl = envVtable.add(ENV_VTABLE_OFFSET_FATAL_ERROR).readPointer();
+  // I think if we can find the JNI_FatalError function symbol and its address matches nextFuncImpl, then it should be fine.
+  let checkFatalError = Module.enumerateSymbolsSync('libart.so').filter(m => m.name.indexOf('art3JNI') >= 0 &&
+                                                                            m.name.indexOf('FatalError') >=0 &&
+                                                                            m.address.toString() === nextFuncImpl.toString())[0];
 
-  if (Process.arch === 'arm64') {
+  if (Process.arch === 'arm64' && checkFatalError === undefined) {
     let JNI_FatalError_Called_string_found_addr;
     let JNI_FatalError_Called_string = '4A 4E 49 20 46 61 74 61 6C 45 72 72 6F 72 20 63 61 6C';
     const rodata_seciton = Module.enumerateSectionsSync('libart.so').filter(s => s.name == '.rodata')[0];
