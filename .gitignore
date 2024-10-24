@@ -6,4 +6,5 @@ venv
 ios-assets
 frida-java-bridge
 frida-orig
+/test/
 

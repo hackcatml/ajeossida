@@ -7,8 +7,9 @@ import sys
 CUSTOM_NAME = "ajeossida"
 BUILD_IOS = False
 
-# Temporarily fixing the issue 'Unable to perform state transition.', 'Failed to reach single-threaded state'
-TEMP = 1
+# Temporarily fixing the issue 'Unable to perform state transition.', 'Failed to reach single-threaded state',
+# Process.enumerateThreads() crash
+TEMP = 0
 
 
 def run_command(command, cwd=None):
@@ -227,6 +228,16 @@ def fix_failed_to_reach_single_threaded_state(custom_dir):
     shutil.copy(new_cloak_vala_path, old_cloak_vala_path)
 
 
+def fix_process_enumerate_threads_crash(custom_dir):
+    # On the Pixel 4a, if there's a thread named perfetto_hprof_, then Process.enumerateThreads() crashes with SEGV_ACCERR.
+    gumprocess_linux_path = os.path.join(custom_dir, "subprojects/frida-gum/gum/backend-linux/gumprocess-linux.c")
+    replace_strings_in_files(gumprocess_linux_path,
+                             '    details.name = thread_name;',
+                             '    details.name = thread_name;\n'
+                             '    if (strcmp(details.name, "perfetto_hprof_") == 0)\n'
+                             '        continue;')
+
+
 def main():
     custom_dir = os.path.join(os.getcwd(), CUSTOM_NAME)
     if os.path.exists(custom_dir):
@@ -300,6 +311,14 @@ def main():
         replace_strings_in_files(custom_dir,
                                  wrong_patch_string,
                                  wrong_patch_string.replace(CUSTOM_NAME, 'frida'))
+
+    # memfd_create patch, memfd:ajeossida-agent-64.so --> memfd:jit-cache
+    print(f"\n[*] Patch MemoryFileDescriptor.memfd_create")
+    frida_helper_backend_path = os.path.join(custom_dir,
+                                             "subprojects/frida-core/src/linux/frida-helper-backend.vala")
+    replace_strings_in_files(frida_helper_backend_path,
+                             'return Linux.syscall (SysCall.memfd_create, name, flags);',
+                             'return Linux.syscall (SysCall.memfd_create, \"jit-cache\", flags);')
 
     # frida-server patch
     print(f"\n[*] Patch 'frida-server' with '{CUSTOM_NAME}-server' recursively...")
@@ -413,6 +432,7 @@ def main():
     if TEMP == 1:
         fix_unable_to_perform_state_transition(custom_dir)
         fix_failed_to_reach_single_threaded_state(custom_dir)
+        fix_process_enumerate_threads_crash(custom_dir)
 
     # Second build after patching
     for build_dir in build_dirs:

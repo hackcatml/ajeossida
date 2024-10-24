@@ -7,6 +7,10 @@ import requests
 
 CUSTOM_NAME = "ajeossida"
 
+# Temporarily fixing the issue 'Unable to perform state transition.', 'Failed to reach single-threaded state',
+# Process.enumerateThreads() crash
+TEMP = 1
+
 
 def run_command(command, cwd=None):
     try:
@@ -110,6 +114,94 @@ def capitalize_first_lower_char(word):
     return word
 
 
+# Helper function to extract lines between fix markers
+def extract_between_fixes(filename, start_marker, end_marker):
+    with open(filename, 'r', encoding='utf-8') as file:
+        lines = []
+        start_reading = False
+        for line in file:
+            if start_marker in line:
+                start_reading = True
+                continue
+            if end_marker in line:
+                break
+            if start_reading:
+                lines.append(line)
+        lines.pop()
+        return ''.join(lines)
+
+
+def fix_unable_to_perform_state_transition(custom_dir):
+    repo_url = "https://github.com/frida/frida-java-bridge.git"
+    run_command(f"git clone {repo_url}")
+    frida_java_bridge_path = os.path.join(os.getcwd(), "frida-java-bridge")
+    run_command(f"sudo npm remove -g frida-java-bridge", cwd=frida_java_bridge_path)
+    run_command(f"npm install", cwd=frida_java_bridge_path)
+    run_command(f"sudo npm link", cwd=frida_java_bridge_path)
+
+    generate_runtime_path = os.path.join(custom_dir, "subprojects/frida-gum/bindings/gumjs/generate-runtime.py")
+    replace_strings_in_files(generate_runtime_path,
+                             'frida_compile = priv_dir / "node_modules" / ".bin" / make_script_filename("frida-compile")',
+                             'frida_compile = priv_dir / "node_modules" / ".bin" / make_script_filename("frida-compile")\n'
+                             '    subprocess.run([npm, "link", "frida-java-bridge"],\n'
+                             '                    capture_output=True,\n'
+                             '                    cwd=priv_dir,\n'
+                             '                    check=True)')
+
+    frida_java_bridge_android_js_path = os.path.join(frida_java_bridge_path, "lib/android.js")
+    content = extract_between_fixes("fix_unable_to_perform_state_transition.txt", "# fix_1", "# fix_2")
+    replace_strings_in_files(frida_java_bridge_android_js_path,
+                             '  const mayUseCollector = (apiLevel > 28)\n'
+                             '    ? (type) => {\n'
+                             '        const impl = Module.findExportByName(\'libart.so\', \'_ZNK3art2gc4Heap15MayUseCollectorENS0_13CollectorTypeE\');\n'
+                             '        if (impl === null) {\n'
+                             '          return false;\n'
+                             '        }\n'
+                             '        return new NativeFunction(impl, \'bool\', [\'pointer\', \'int\'])(getApi().artHeap, type);\n'
+                             '      }\n'
+                             '    : () => false;\n'
+                             '  const kCollectorTypeCMC = 3;\n'
+                             '\n'
+                             '  if (mayUseCollector(kCollectorTypeCMC)) {\n'
+                             '    Interceptor.attach(Module.getExportByName(\'libart.so\', \'_ZN3art6Thread15RunFlipFunctionEPS0_b\'), artController.hooks.Gc.runFlip);\n'
+                             '  } else {\n'
+                             '    let copyingPhase = null;\n'
+                             '    if (apiLevel > 28) {\n'
+                             '      copyingPhase = Module.findExportByName(\'libart.so\', \'_ZN3art2gc9collector17ConcurrentCopying12CopyingPhaseEv\');\n'
+                             '    } else if (apiLevel > 22) {\n'
+                             '      copyingPhase = Module.findExportByName(\'libart.so\', \'_ZN3art2gc9collector17ConcurrentCopying12MarkingPhaseEv\');\n'
+                             '    }\n'
+                             '    if (copyingPhase !== null) {\n'
+                             '      Interceptor.attach(copyingPhase, artController.hooks.Gc.copyingPhase);\n'
+                             '    }',
+                             content)
+
+    content = extract_between_fixes("fix_unable_to_perform_state_transition.txt", "# fix_2", "# fix_end")
+    replace_strings_in_files(frida_java_bridge_android_js_path,
+                             'function makeArtThreadStateTransitionImpl (vm, env, callback) {\n'
+                             '  const envVtable = env.handle.readPointer();\n'
+                             '  const exceptionClearImpl = envVtable.add(ENV_VTABLE_OFFSET_EXCEPTION_CLEAR).readPointer();\n'
+                             '  const nextFuncImpl = envVtable.add(ENV_VTABLE_OFFSET_FATAL_ERROR).readPointer();',
+                             content)
+
+
+def fix_failed_to_reach_single_threaded_state(custom_dir):
+    old_cloak_vala_path = os.path.join(custom_dir, "subprojects/frida-core/lib/payload/cloak.vala")
+    new_cloak_vala_path = os.path.join(os.getcwd(), "fix_failed_to_reach_single_threaded_state.txt")
+    os.remove(old_cloak_vala_path)
+    shutil.copy(new_cloak_vala_path, old_cloak_vala_path)
+
+
+def fix_process_enumerate_threads_crash(custom_dir):
+    # On the Pixel 4a, if there is a thread named perfetto_hprof_, Process.enumerateThreads() crashes with SEGV_ACCERR
+    gumprocess_linux_path = os.path.join(custom_dir, "subprojects/frida-gum/gum/backend-linux/gumprocess-linux.c")
+    replace_strings_in_files(gumprocess_linux_path,
+                             '    details.name = thread_name;',
+                             '    details.name = thread_name;\n'
+                             '    if (strcmp(details.name, "perfetto_hprof_") == 0)\n'
+                             '        continue;')
+
+
 def main():
     custom_dir = os.path.join(os.getcwd(), CUSTOM_NAME)
     if os.path.exists(custom_dir):
@@ -127,6 +219,8 @@ def main():
     ndk_path = os.path.join(os.getcwd(), download_ndk())
 
     architectures = ["android-arm64", "android-arm", "android-x86_64", "android-x86"]
+    if TEMP == 1:
+        architectures = ["android-arm64"]
     build_dirs = [configure_build(ndk_path, arch) for arch in architectures]
 
     # libfrida-agent-raw.so patch
@@ -153,11 +247,13 @@ def main():
 
     # frida-agent patch
     print(f"\n[*] Patch 'frida-agent' with '{CUSTOM_NAME}-agent' recursively...")
-    patch_strings = ["frida-agent-", "\"agent\" / \"frida-agent.", "\'frida-agent\'", "\"frida-agent\"", "get_frida_agent_", "\'FridaAgent\'"]
+    patch_strings = ["frida-agent-", "\"agent\" / \"frida-agent.", "\'frida-agent\'", "\"frida-agent\"",
+                     "get_frida_agent_", "\'FridaAgent\'"]
     for patch_string in patch_strings:
         replace_strings_in_files(custom_dir,
                                  patch_string,
-                                 patch_string.replace("Frida", capitalize_first_lower_char(CUSTOM_NAME)) if "Frida" in patch_string else
+                                 patch_string.replace("Frida", capitalize_first_lower_char(
+                                     CUSTOM_NAME)) if "Frida" in patch_string else
                                  patch_string.replace("frida", CUSTOM_NAME))
 
     # Patch the original file back, which has incorrectly patched strings.
@@ -166,6 +262,14 @@ def main():
         replace_strings_in_files(custom_dir,
                                  wrong_patch_string,
                                  wrong_patch_string.replace(CUSTOM_NAME, 'frida'))
+
+    # memfd_create patch, memfd:ajeossida-agent-64.so --> memfd:jit-cache
+    print(f"\n[*] Patch MemoryFileDescriptor.memfd_create")
+    frida_helper_backend_path = os.path.join(custom_dir,
+                                             "subprojects/frida-core/src/linux/frida-helper-backend.vala")
+    replace_strings_in_files(frida_helper_backend_path,
+                             'return Linux.syscall (SysCall.memfd_create, name, flags);',
+                             'return Linux.syscall (SysCall.memfd_create, \"jit-cache\", flags);')
 
     # frida-server patch
     print(f"\n[*] Patch 'frida-server' with '{CUSTOM_NAME}-server' recursively...")
@@ -203,11 +307,13 @@ def main():
                              patch_string.replace("frida", CUSTOM_NAME))
 
     frida_gadget_meson_path = os.path.join(custom_dir, "subprojects/frida-core/lib/gadget/meson.build")
-    patch_strings = ["frida-gadget-modulated", "libfrida-gadget-modulated", "frida-gadget-raw", "\'frida-gadget\'", "frida-gadget-universal", "FridaGadget.dylib"]
+    patch_strings = ["frida-gadget-modulated", "libfrida-gadget-modulated", "frida-gadget-raw", "\'frida-gadget\'",
+                     "frida-gadget-universal", "FridaGadget.dylib"]
     for patch_string in patch_strings:
         replace_strings_in_files(frida_gadget_meson_path,
                                  patch_string,
-                                 patch_string.replace("Frida", capitalize_first_lower_char(CUSTOM_NAME)) if "Frida" in patch_string else
+                                 patch_string.replace("Frida", capitalize_first_lower_char(
+                                     CUSTOM_NAME)) if "Frida" in patch_string else
                                  patch_string.replace("frida", CUSTOM_NAME))
 
     # gum-js-loop patch
@@ -235,8 +341,9 @@ def main():
 
     # frida/subprojects/frida-gum/gum/backend-posix/gumexceptor-posix.c
     gumexceptor_posix_path = os.path.join(custom_dir, "subprojects/frida-gum/gum/backend-posix/gumexceptor-posix.c")
-    gumexceptor_posix_patch_strings = ["gum_interceptor_replace", "gum_exceptor_backend_replacement_signal, self, NULL);",
-                     "gum_exceptor_backend_replacement_sigaction, self, NULL);"]
+    gumexceptor_posix_patch_strings = ["gum_interceptor_replace",
+                                       "gum_exceptor_backend_replacement_signal, self, NULL);",
+                                       "gum_exceptor_backend_replacement_sigaction, self, NULL);"]
     for patch_string in gumexceptor_posix_patch_strings:
         replace_strings_in_files(gumexceptor_posix_path,
                                  patch_string,
@@ -253,6 +360,11 @@ def main():
     replace_strings_in_files(custom_dir,
                              patch_string,
                              patch_string.replace("frida", CUSTOM_NAME))
+
+    if TEMP == 1:
+        fix_unable_to_perform_state_transition(custom_dir)
+        fix_failed_to_reach_single_threaded_state(custom_dir)
+        fix_process_enumerate_threads_crash(custom_dir)
 
     # Second build after patching
     for build_dir in build_dirs:
@@ -296,16 +408,24 @@ def main():
     for file_path in patch_list:
         if '-agent.so' in file_path:
             continue
+
         arch = [i for i in file_path.split(os.sep) if i.startswith('android-')]
         arch = arch[0] if arch else ''
+
         if file_path.endswith('.so'):
             new_file_path = f"{file_path.rsplit('.so', 1)[0]}-{frida_version}-{arch}.so"
+            if TEMP == 1:
+                new_file_path = f"{file_path.rsplit('.so', 1)[0]}-{frida_version}-{arch}-temp.so"
         else:
             new_file_path = f"{file_path}-{frida_version}-{arch}"
+            if TEMP == 1:
+                new_file_path = f"{file_path}-{frida_version}-{arch}-temp"
+
         try:
             os.rename(file_path, new_file_path)
             print(f"\n[*] Renamed {file_path} to {new_file_path}")
             compress_file(new_file_path)
+
             shutil.move(f"{new_file_path}.gz", f"{assets_dir}")
         except Exception as e:
             print(f"[!] Error renaming {file_path}: {e}")
