@@ -36,4 +36,5 @@ Output: server, gagdet (Android)<br>
 # References
 - [strongR-frida-android](https://github.com/hzzheyang/strongR-frida-android)<br>
 - [Florida](https://github.com/Ylarod/Florida)
+- [magisk-frida](https://github.com/ViRb3/magisk-frida)
 
