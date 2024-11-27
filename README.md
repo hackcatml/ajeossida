@@ -29,6 +29,13 @@ Output: server, gadget (Android, iOS)<br>
 Output: server, gagdet (Android)<br>
 `python3 main_ubuntu.py`
 
+# MagiskAjeossida
+* A magisk module that automatically runs ajeossida-server on boot.  
+* To run it in remote mode, use the following command. It will listen on `0.0.0.0:45678`.  
+`adb shell "su -c sed -i 's/REMOTE=0/REMOTE=1/' /data/adb/modules/magisk_ajeossida/service.sh"`
+* You can attach Frida to a pairipcore protected app using this module.  
+However, the app will crash after a few seconds. Bypassing the crash is up to you. (Spawning the app also causes it to crash)
+
 # Contact
 - Channel: https://t.me/hackcatml1
 - Chat: https://t.me/hackcatmlchat
