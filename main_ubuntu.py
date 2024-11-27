@@ -148,41 +148,10 @@ def fix_unable_to_perform_state_transition(custom_dir):
                              '                    cwd=priv_dir,\n'
                              '                    check=True)')
 
-    frida_java_bridge_android_js_path = os.path.join(frida_java_bridge_path, "lib/android.js")
-    content = extract_between_fixes("fix_unable_to_perform_state_transition.txt", "# fix_1", "# fix_2")
-    replace_strings_in_files(frida_java_bridge_android_js_path,
-                             '  const mayUseCollector = (apiLevel > 28)\n'
-                             '    ? (type) => {\n'
-                             '        const impl = Module.findExportByName(\'libart.so\', \'_ZNK3art2gc4Heap15MayUseCollectorENS0_13CollectorTypeE\');\n'
-                             '        if (impl === null) {\n'
-                             '          return false;\n'
-                             '        }\n'
-                             '        return new NativeFunction(impl, \'bool\', [\'pointer\', \'int\'])(getApi().artHeap, type);\n'
-                             '      }\n'
-                             '    : () => false;\n'
-                             '  const kCollectorTypeCMC = 3;\n'
-                             '\n'
-                             '  if (mayUseCollector(kCollectorTypeCMC)) {\n'
-                             '    Interceptor.attach(Module.getExportByName(\'libart.so\', \'_ZN3art6Thread15RunFlipFunctionEPS0_b\'), artController.hooks.Gc.runFlip);\n'
-                             '  } else {\n'
-                             '    let copyingPhase = null;\n'
-                             '    if (apiLevel > 28) {\n'
-                             '      copyingPhase = Module.findExportByName(\'libart.so\', \'_ZN3art2gc9collector17ConcurrentCopying12CopyingPhaseEv\');\n'
-                             '    } else if (apiLevel > 22) {\n'
-                             '      copyingPhase = Module.findExportByName(\'libart.so\', \'_ZN3art2gc9collector17ConcurrentCopying12MarkingPhaseEv\');\n'
-                             '    }\n'
-                             '    if (copyingPhase !== null) {\n'
-                             '      Interceptor.attach(copyingPhase, artController.hooks.Gc.copyingPhase);\n'
-                             '    }',
-                             content)
-
-    content = extract_between_fixes("fix_unable_to_perform_state_transition.txt", "# fix_2", "# fix_end")
-    replace_strings_in_files(frida_java_bridge_android_js_path,
-                             'function makeArtThreadStateTransitionImpl (vm, env, callback) {\n'
-                             '  const envVtable = env.handle.readPointer();\n'
-                             '  const exceptionClearImpl = envVtable.add(ENV_VTABLE_OFFSET_EXCEPTION_CLEAR).readPointer();\n'
-                             '  const nextFuncImpl = envVtable.add(ENV_VTABLE_OFFSET_FATAL_ERROR).readPointer();',
-                             content)
+    old_frida_java_bridge_android_js_path = os.path.join(frida_java_bridge_path, "lib/android.js")
+    new_frida_java_bridge_android_js_path = os.path.join(os.getcwd(), "fix_unable_to_perform_state_transition.txt")
+    os.remove(old_frida_java_bridge_android_js_path)
+    shutil.copy(new_frida_java_bridge_android_js_path, old_frida_java_bridge_android_js_path)
 
 
 def fix_failed_to_reach_single_threaded_state(custom_dir):
