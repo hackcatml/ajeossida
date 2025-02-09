@@ -3,13 +3,11 @@ import os
 import shutil
 import subprocess
 import sys
-import requests
 
 CUSTOM_NAME = "ajeossida"
 
-# Temporarily fixing the issue 'Unable to perform state transition.', 'Failed to reach single-threaded state',
-# Process.enumerateThreads() crash
-TEMP = 1
+# Temporarily fixing the issue 'Failed to reach single-threaded state', Process.enumerateThreads() crash
+TEMP = 0
 
 
 def run_command(command, cwd=None):
@@ -29,23 +27,28 @@ def git_clone_repo():
     run_command(f"git clone --recurse-submodules {repo_url} {destination_dir}")
 
 
-def download_ndk():
-    url = "https://dl.google.com/android/repository/android-ndk-r25c-linux.zip"
-    file_name = "android-ndk-r25c-linux.zip"
-    unzip_dir = "android-ndk-r25c"
+def check_ndk_version():
+    home_path = os.path.expanduser("~")
+    ndk_base = os.path.join(home_path, "Library/Android/sdk/ndk")
 
-    print(f"\n[*] Downloading {file_name}...")
-    response = requests.get(url, stream=True)
-    with open(file_name, 'wb') as file:
-        for chunk in response.iter_content(chunk_size=128):
-            file.write(chunk)
-    print(f"\n[*] Downloaded {file_name}")
+    ndk_versions = []
 
-    run_command(f"unzip {file_name} >/dev/null")
+    for ndk_version in os.listdir(ndk_base):
+        dir_path = os.path.join(ndk_base, ndk_version)
 
-    os.remove(file_name)
+        if os.path.isdir(dir_path) and ndk_version.startswith("25."):
+            ndk_versions.append(ndk_version)
 
-    return unzip_dir
+    if not ndk_versions:
+        print("\n[!] Android NDK r25 is needed")
+        sys.exit(1)
+
+    # Sort versions and pick the largest
+    biggest_version = max(ndk_versions, key=lambda v: list(map(int, v.split('.'))))
+
+    biggest_version_path = os.path.join(ndk_base, biggest_version)
+    print(f"[*] NDK version: {biggest_version}")
+    return biggest_version_path
 
 
 def configure_build(ndk_path, arch):
@@ -54,6 +57,7 @@ def configure_build(ndk_path, arch):
 
     os.environ['ANDROID_NDK_ROOT'] = ndk_path
 
+    print(f"\n[*] Configuring the build for {arch}...")
     result = run_command(f"{os.path.join('..', 'configure')} --host={arch}", cwd=build_dir)
 
     if result == 0:
@@ -114,46 +118,6 @@ def capitalize_first_lower_char(word):
     return word
 
 
-# Helper function to extract lines between fix markers
-def extract_between_fixes(filename, start_marker, end_marker):
-    with open(filename, 'r', encoding='utf-8') as file:
-        lines = []
-        start_reading = False
-        for line in file:
-            if start_marker in line:
-                start_reading = True
-                continue
-            if end_marker in line:
-                break
-            if start_reading:
-                lines.append(line)
-        lines.pop()
-        return ''.join(lines)
-
-
-def fix_unable_to_perform_state_transition(custom_dir):
-    repo_url = "https://github.com/frida/frida-java-bridge.git"
-    run_command(f"git clone {repo_url}")
-    frida_java_bridge_path = os.path.join(os.getcwd(), "frida-java-bridge")
-    run_command(f"sudo npm remove -g frida-java-bridge", cwd=frida_java_bridge_path)
-    run_command(f"npm install", cwd=frida_java_bridge_path)
-    run_command(f"sudo npm link", cwd=frida_java_bridge_path)
-
-    generate_runtime_path = os.path.join(custom_dir, "subprojects/frida-gum/bindings/gumjs/generate-runtime.py")
-    replace_strings_in_files(generate_runtime_path,
-                             'frida_compile = priv_dir / "node_modules" / ".bin" / make_script_filename("frida-compile")',
-                             'frida_compile = priv_dir / "node_modules" / ".bin" / make_script_filename("frida-compile")\n'
-                             '    subprocess.run([npm, "link", "frida-java-bridge"],\n'
-                             '                    capture_output=True,\n'
-                             '                    cwd=priv_dir,\n'
-                             '                    check=True)')
-
-    old_frida_java_bridge_android_js_path = os.path.join(frida_java_bridge_path, "lib/android.js")
-    new_frida_java_bridge_android_js_path = os.path.join(os.getcwd(), "fix_unable_to_perform_state_transition.txt")
-    os.remove(old_frida_java_bridge_android_js_path)
-    shutil.copy(new_frida_java_bridge_android_js_path, old_frida_java_bridge_android_js_path)
-
-
 def fix_failed_to_reach_single_threaded_state(custom_dir):
     old_cloak_vala_path = os.path.join(custom_dir, "subprojects/frida-core/lib/payload/cloak.vala")
     new_cloak_vala_path = os.path.join(os.getcwd(), "fix_failed_to_reach_single_threaded_state.txt")
@@ -162,7 +126,7 @@ def fix_failed_to_reach_single_threaded_state(custom_dir):
 
 
 def fix_process_enumerate_threads_crash(custom_dir):
-    # On the Pixel 4a, if there is a thread named perfetto_hprof_, Process.enumerateThreads() crashes with SEGV_ACCERR
+    # On the Pixel 4a, if there's a thread named perfetto_hprof_, then Process.enumerateThreads() crashes with SEGV_ACCERR.
     gumprocess_linux_path = os.path.join(custom_dir, "subprojects/frida-gum/gum/backend-linux/gumprocess-linux.c")
     replace_strings_in_files(gumprocess_linux_path,
                              '    details.name = thread_name;',
@@ -185,12 +149,12 @@ def main():
 
     git_clone_repo()
 
-    ndk_path = os.path.join(os.getcwd(), download_ndk())
+    ndk_version_path = check_ndk_version()
 
     architectures = ["android-arm64", "android-arm", "android-x86_64", "android-x86"]
     if TEMP == 1:
         architectures = ["android-arm64"]
-    build_dirs = [configure_build(ndk_path, arch) for arch in architectures]
+    build_dirs = [configure_build(ndk_version_path, arch) for arch in architectures]
 
     # libfrida-agent-raw.so patch
     print(f"\n[*] Patch 'libfrida-agent-raw.so' with 'lib{CUSTOM_NAME}-agent-raw.so' recursively...")
@@ -226,7 +190,7 @@ def main():
                                  patch_string.replace("frida", CUSTOM_NAME))
 
     # Patch the original file back, which has incorrectly patched strings.
-    wrong_patch_strings = [f'{CUSTOM_NAME}-agent-x86.symbols']
+    wrong_patch_strings = [f'{CUSTOM_NAME}-agent-x86.symbols', f'{CUSTOM_NAME}-agent-android.version']
     for wrong_patch_string in wrong_patch_strings:
         replace_strings_in_files(custom_dir,
                                  wrong_patch_string,
@@ -299,7 +263,7 @@ def main():
                              patch_string,
                              patch_string.replace("frida", CUSTOM_NAME))
 
-    # No libc.so libsystem_c.dylib hooking
+    # No libc.so hooking
     print(f"\n[*] Patch not to hook libc function")
     # frida/subprojects/frida-core/lib/payload/exit-monitor.vala
     exit_monitor_path = os.path.join(custom_dir, "subprojects/frida-core/lib/payload/exit-monitor.vala")
@@ -318,6 +282,14 @@ def main():
                                  patch_string,
                                  "// " + patch_string)
 
+    # Selinux patch for Android
+    print(f"\n[*] Patch 'frida_file', 'frida_memfd with '{CUSTOM_NAME}_file', '{CUSTOM_NAME}_memfd' recursively...")
+    patch_strings = ["\"frida_file\"", "\"frida_memfd\"", ":frida_file", ":frida_memfd"]
+    for patch_string in patch_strings:
+        replace_strings_in_files(custom_dir,
+                                 patch_string,
+                                 patch_string.replace("frida", CUSTOM_NAME))
+
     # Perform the first build
     for build_dir in build_dirs:
         print(f"\n[*] First build for {build_dir.rsplit('/')[-1]}")
@@ -331,7 +303,6 @@ def main():
                              patch_string.replace("frida", CUSTOM_NAME))
 
     if TEMP == 1:
-        fix_unable_to_perform_state_transition(custom_dir)
         fix_failed_to_reach_single_threaded_state(custom_dir)
         fix_process_enumerate_threads_crash(custom_dir)
 
@@ -350,9 +321,12 @@ def main():
     pool_spawner = bytes.fromhex('70 6f 6f 6c 2d 73 70 61 77 6e 65 72 00')
     pool_spoiler = bytes.fromhex('70 6f 6f 6c 2d 73 70 6f 69 6c 65 72 00')
 
-    patch_list = [os.path.join(build_dir, f"subprojects/frida-core/server/{CUSTOM_NAME}-server") for build_dir in build_dirs] + \
-                 [os.path.join(build_dir, f"subprojects/frida-core/lib/agent/{CUSTOM_NAME}-agent.so") for build_dir in build_dirs] + \
-                 [os.path.join(build_dir, f"subprojects/frida-core/lib/gadget/{CUSTOM_NAME}-gadget.so") for build_dir in build_dirs]
+    patch_list = [os.path.join(build_dir, f"subprojects/frida-core/server/{CUSTOM_NAME}-server") for build_dir in
+                  build_dirs] + \
+                 [os.path.join(build_dir, f"subprojects/frida-core/lib/agent/{CUSTOM_NAME}-agent.so") for build_dir in
+                  build_dirs] + \
+                 [os.path.join(build_dir, f"subprojects/frida-core/lib/gadget/{CUSTOM_NAME}-gadget.so") for build_dir in
+                  build_dirs]
 
     for file_path in patch_list:
         # Open the binary file for reading and writing
@@ -398,6 +372,8 @@ def main():
             shutil.move(f"{new_file_path}.gz", f"{assets_dir}")
         except Exception as e:
             print(f"[!] Error renaming {file_path}: {e}")
+
+    print(f"\n[*] Building of {CUSTOM_NAME} completed. The output is in the assets directory")
 
 
 if __name__ == "__main__":
